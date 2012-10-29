@@ -1,5 +1,5 @@
-#ifndef PV197_IDCT_CPU_H
-#define PV197_IDCT_CPU_H
+#ifndef PV197_IDCT_FCPU_H
+#define PV197_IDCT_FCPU_H
 #include <stdint.h>
 
 /** Inverse DCT on CPU. Function prepares computation, allocates buffers,
@@ -10,5 +10,6 @@
   * @param source       - Pointer to 3 components of input image
   *
   */
-void idct_cpu(int pix_width, int pix_height, int16_t** source, uint8_t **output);
+void idct_fcpu(int pix_width, int pix_height, int16_t** source, uint8_t** output);
 #endif
+

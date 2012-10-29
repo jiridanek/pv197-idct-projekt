@@ -1,3 +1,7 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "idct_cpu.h"
 
 #define W1 2841 // 2048*sqrt(2)*cos(1*pi/16)
@@ -8,7 +12,7 @@
 #define W7 565  // 2048*sqrt(2)*cos(7*pi/16)
 
 /** Clipping table and pointer to it */
-static int16_t iclip[1024];
+static int16_t* iclip;//[1024];
 static int16_t* iclp;
 
 /**
@@ -158,6 +162,7 @@ void idct_cpu_perform(int16_t* block)
  */
 void idct_cpu_init()
 {
+    iclip = (int16_t *)malloc(1024*2);
     iclp = iclip + 512;
     for ( int i = -512; i < 512; i++ )
         iclp[i] = (i < -256) ? -256 : ((i > 255) ? 255 : i);
@@ -165,7 +170,7 @@ void idct_cpu_init()
 
 /** Documented at declaration */
 void 
-idct_cpu(int pix_width, int pix_height, int16_t** source)
+idct_cpu(int pix_width, int pix_height, int16_t** source, uint8_t** output)
 {
     idct_cpu_init();
 
@@ -183,6 +188,31 @@ idct_cpu(int pix_width, int pix_height, int16_t** source)
                 idct_cpu_perform( &component[index * 64]);
             }
         }
-    }
-}
 
+        uint8_t* out = output[comp];
+        uint8_t* tmp = (uint8_t*)malloc(pix_width*pix_height);
+
+        //convert to uint
+        for (int i = 0; i < pix_width*pix_height; i++) {
+            tmp[i] = (uint8_t)component[i]+128;
+        }
+
+        // Transform lines to visual blocks
+        int pos = 0;
+        for (int y = 0; y < pix_height; y+=8) {
+            for (int x = 0; x < pix_width; x+=8) {
+                int idx = y*pix_width + x;
+
+                // Read the block
+                for (int i = 0; i < 8; i++) {
+                    memcpy(out+idx+i*pix_width, tmp+pos, 8*sizeof(uint8_t));
+                    pos += 8;
+                }
+            }
+        }
+
+        free(tmp);
+    }
+
+    free(iclip);
+}

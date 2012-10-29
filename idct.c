@@ -4,15 +4,19 @@
 #include <string.h>
 #include <cuda_runtime.h>
 #include <stdint.h>
+#include <math.h>
+#include <assert.h>
 
 #include "common.h"
 #include "idct_gpu.h"
 #include "idct_cpu.h"
+#include "idct_fcpu.h"
 
 // Load data
 int
 load_data_from_file(const char* filename, int16_t* buffer, int size)
 {
+    printf("Loading %s\n", filename);
     FILE* file;
     file = fopen(filename, "rb");
     if ( !file ) {
@@ -21,30 +25,72 @@ load_data_from_file(const char* filename, int16_t* buffer, int size)
     }
 
     if ( size != fread(buffer, sizeof(int16_t), size, file) ) {
-        fprintf(stderr, "[Error] Failed to load image data [%d bytes] from file %s!\n", size, filename);
+        fprintf(stderr, "[Error] Failed to load image data [%d bytes] from file %s!\n", 2*size, filename);
         exit(-1);
     }
     fclose(file);
 }
 
+
+void
+store_to_file(const char* filename, uint8_t* buffer, int size)
+{
+    printf("Storing %s\n", filename);
+    FILE* file;
+    file = fopen(filename, "wb");
+    if ( !file ) {
+        fprintf(stderr, "[Error] Failed open %s for writing!\n", filename);
+        exit(-1);
+    }
+
+    if ( size != fwrite(buffer, sizeof(uint8_t), size, file) ) {
+        fprintf(stderr, "[Error] Failed to store image data [%d bytes] from file %s!\n", size, filename);
+        exit(-1);
+    }
+    fclose(file);
+}
+
+
 // Compare GPU and CPU outputs
 int 
-idct_cpu_compare(int width, int height, int16_t** component, uint8_t** output_from_gpu)
+idct_cpu_compare(int width, int height, int16_t** component, uint8_t** output_gpu)
 {
+    uint8_t* output_cpu[3];
+    // Allocate output buffers
+    for (int i = 0; i < 3; i++) {
+        output_cpu[i] = (uint8_t *)malloc(width*height * sizeof(uint8_t));
+    }
+
+    // Timing
+    GPUJPEG_TIMER_INIT();
+    
     // IDCT on CPU
-    idct_cpu(width, height, component);
+    GPUJPEG_TIMER_START();
+    idct_fcpu(width, height, component, output_cpu);  // Double  version
+    //idct_cpu(width, height, component, output_cpu); // Integer version
+    GPUJPEG_TIMER_STOP();
+    printf("IDCT FCPU:          %10.2f ms\n", GPUJPEG_TIMER_DURATION());
         
-    // Compare results
-    for (int j; j < 3; j++) {
-        int16_t * c = component[j];
-        uint8_t * o = output_from_gpu[j];
-        for (int i; i < width*height; i++) {
-            if (c[i] != o[i]) {
-                printf("Results does not match: %d != %d, position %d\n", c[i], o[i], i);
-                return -1;
-            }
+    float mse = 0;
+    float s = 3*width*height;
+
+    // Compare results and compute MSE
+    for (int j = 0; j < 3; j++) {
+        uint8_t * oc = output_cpu[j];
+        uint8_t * og = output_gpu[j];
+
+        for (int i = 0; i < width*height; i++) {
+            mse += powf(oc[i] - og[i], 2)/s;
         }
     }
+    printf("Overal MSE is: %f\n", mse);
+
+    // Free
+    for (int i = 0; i < 3; i++) {
+        free(output_cpu[i]);
+    }
+
+    return 0;
 }
 
 void
@@ -103,8 +149,8 @@ init_gpu_device(int device_id)
     cuda_check_error("Set CUDA device");
 
     // Test by simple copying that the device is ready
-    uint8_t data[] = {8};
-    uint8_t* d_data = NULL;
+    int8_t data[] = {8};
+    int8_t* d_data = NULL;
     cudaMalloc((void**)&d_data, 1);
     cudaMemcpy(d_data, data, 1, cudaMemcpyHostToDevice);
     cudaFree(d_data);
@@ -203,20 +249,26 @@ main(int argc, char *argv[])
     // Call GPU
     printf("Calling GPU IDCT\n");
     GPUJPEG_TIMER_START();
-    idct_gpu(width, height, component, output);
+    //idct_gpu(width, height, component, output);
     GPUJPEG_TIMER_STOP();
     
     // Print Timing
-    printf("IDCT:          %10.2f ms\n", GPUJPEG_TIMER_DURATION());
+    printf("GPU TOTAL IDCT:          %10.2f ms\n", GPUJPEG_TIMER_DURATION());
 
     // Call CPU compare
-    if ( idct_cpu_compare(width, height, component, output) == 0 ) {
-        printf("CPU Test: OK\n");
-    } else {
-        printf("CPU Test: Output from GPU differs\n");
-    }
+    idct_cpu_compare(width, height, component, output);
+
+    // Store result to file
+    char *filename = (char*)malloc(strlen(argv[0]+5));
+
+    sprintf(filename, "%s.out", argv[0]);
+    store_to_file(filename, output[0], size);
+
+    sprintf(filename, "%s.out", argv[1]);
+    store_to_file(filename, output[1], size);
+
+    sprintf(filename, "%s.out", argv[2]);
+    store_to_file(filename, output[2], size);
+
+    return 0;
 }
-
-
-
-
